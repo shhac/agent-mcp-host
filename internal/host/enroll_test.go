@@ -148,16 +148,6 @@ func TestHostNoDescriptorNoEnrollment(t *testing.T) {
 	}
 }
 
-func TestNamespaceBinding(t *testing.T) {
-	got := namespaceBinding(map[string]string{"workspace": "acme", "team": "t1"}, "slack")
-	if got["slack:workspace"] != "acme" || got["slack:team"] != "t1" || len(got) != 2 {
-		t.Errorf("namespaceBinding = %v", got)
-	}
-	if namespaceBinding(nil, "slack") != nil {
-		t.Error("empty binding should stay nil")
-	}
-}
-
 func readBody(resp *http.Response) (string, error) {
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)

@@ -74,7 +74,7 @@ func New(cfg Config) (*Host, error) {
 		return nil, errors.New("host: at least one mount is required")
 	}
 	publicURL := strings.TrimRight(cfg.PublicURL, "/")
-	resources, resourceMount, err := mountResources(publicURL, cfg.Mounts)
+	resources, byResource, err := mountResources(publicURL, cfg.Mounts)
 	if err != nil {
 		return nil, err
 	}
@@ -84,10 +84,7 @@ func New(cfg Config) (*Host, error) {
 		mounts:          cfg.Mounts,
 		stderr:          orWriter(cfg.Stderr, os.Stderr),
 		stdout:          orWriter(cfg.Stdout, os.Stdout),
-		mountByResource: make(map[string]*Mount, len(cfg.Mounts)),
-	}
-	for _, m := range cfg.Mounts {
-		h.mountByResource[mountResource(publicURL, m.Name)] = m
+		mountByResource: byResource,
 	}
 
 	srv, err := oauth.New(oauth.Config{
@@ -96,9 +93,14 @@ func New(cfg Config) (*Host, error) {
 		Resources:  resources,
 		Asymmetric: true, // tools verify with the public key
 		// Project the namespaced binding down to each mount's own vocabulary:
-		// slack:workspace=acme → workspace=acme in the /slack/mcp token.
+		// slack:workspace=acme → workspace=acme in the /slack/mcp token. An
+		// unknown resource passes through unchanged — never a stripNamespace
+		// against the empty mount name.
 		BindingForResource: func(binding map[string]string, resource string) map[string]string {
-			return stripNamespace(binding, resourceMount[resource])
+			if m := h.mountByResource[resource]; m != nil {
+				return stripNamespace(binding, m.Name)
+			}
+			return binding
 		},
 		// Each mount's own enrollment (built from its discovered descriptor in
 		// handler, validated there), resolved lazily per authorize request.
@@ -128,11 +130,11 @@ func (h *Host) resource(m *Mount) string { return mountResource(h.publicURL, m.N
 func mountResource(publicURL, name string) string { return publicURL + "/" + name + "/mcp" }
 
 // mountResources validates the mounts and returns their audiences (in order)
-// plus the audience→name reverse map the binding projection uses. It rejects a
-// mount missing a name or binary, or a duplicate name.
-func mountResources(publicURL string, mounts []*Mount) (resources []string, byResource map[string]string, err error) {
+// plus the audience→mount reverse map both per-resource AS hooks read. It
+// rejects a mount missing a name or binary, or a duplicate name.
+func mountResources(publicURL string, mounts []*Mount) (resources []string, byResource map[string]*Mount, err error) {
 	resources = make([]string, 0, len(mounts))
-	byResource = make(map[string]string, len(mounts))
+	byResource = make(map[string]*Mount, len(mounts))
 	seen := make(map[string]bool, len(mounts))
 	for _, m := range mounts {
 		if m.Name == "" || m.Binary == "" {
@@ -144,7 +146,7 @@ func mountResources(publicURL string, mounts []*Mount) (resources []string, byRe
 		seen[m.Name] = true
 		res := mountResource(publicURL, m.Name)
 		resources = append(resources, res)
-		byResource[res] = m.Name
+		byResource[res] = m
 	}
 	return resources, byResource, nil
 }
@@ -196,27 +198,33 @@ func (h *Host) handler(ctx context.Context) (http.Handler, func(), error) {
 		}
 	}
 	for _, m := range h.mounts {
-		// Discover the manifest first: the descriptor feeds the AS's
-		// per-resource enrollment, which must be in place before the first
-		// authorize request can arrive.
-		manifest, err := h.discover(ctx, m)
-		if err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("mount %q: %w", m.Name, err)
-		}
-		m.descriptor = manifest.CredentialDescriptor
-		if m.enrollment, err = h.buildEnrollment(m); err != nil {
+		if err := h.bringUpMount(ctx, m, verifyKey); err != nil {
 			cleanup()
 			return nil, nil, err
-		}
-		if err := h.start(ctx, m, verifyKey); err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("mount %q: %w", m.Name, err)
 		}
 		started = append(started, m)
 		mux.Handle(h.mcpPath(m), h.proxy(m))
 	}
 	return withCORS(mux), cleanup, nil
+}
+
+// bringUpMount readies one mount for traffic: it discovers the tool's manifest
+// and builds the mount's per-resource enrollment from the descriptor (which
+// must be on the AS before the first authorize request can arrive), then starts
+// the tool. It leaves mux registration and stop-tracking to the caller.
+func (h *Host) bringUpMount(ctx context.Context, m *Mount, verifyKey string) error {
+	manifest, err := h.discover(ctx, m)
+	if err != nil {
+		return fmt.Errorf("mount %q: %w", m.Name, err)
+	}
+	m.descriptor = manifest.CredentialDescriptor
+	if m.enrollment, err = h.buildEnrollment(m); err != nil {
+		return err
+	}
+	if err := h.start(ctx, m, verifyKey); err != nil {
+		return fmt.Errorf("mount %q: %w", m.Name, err)
+	}
+	return nil
 }
 
 // proxy reverse-proxies a mount's /<name>/mcp to its loopback /mcp, stripping

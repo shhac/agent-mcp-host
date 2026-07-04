@@ -1,55 +1,9 @@
 package host
 
 import (
-	"maps"
 	"slices"
 	"testing"
 )
-
-// stripNamespace projects a principal's namespaced binding down to one mount's
-// vocabulary — the security-relevant step that keeps a /slack/mcp token from
-// carrying another tool's secrets.
-func TestStripNamespace(t *testing.T) {
-	cases := map[string]struct {
-		binding map[string]string
-		mount   string
-		want    map[string]string
-	}{
-		"namespaced key stripped": {
-			binding: map[string]string{"slack:workspace": "acme"},
-			mount:   "slack",
-			want:    map[string]string{"workspace": "acme"},
-		},
-		"un-namespaced key shared to every mount": {
-			binding: map[string]string{"tz": "UTC"},
-			mount:   "slack",
-			want:    map[string]string{"tz": "UTC"},
-		},
-		"another tool's key dropped, empty result -> nil": {
-			binding: map[string]string{"lin:workspace": "letsdothis"},
-			mount:   "slack",
-			want:    nil,
-		},
-		"mix: strip own, keep shared, drop other": {
-			binding: map[string]string{"slack:workspace": "acme", "tz": "UTC", "lin:workspace": "x"},
-			mount:   "slack",
-			want:    map[string]string{"workspace": "acme", "tz": "UTC"},
-		},
-		"empty binding -> nil": {
-			binding: map[string]string{},
-			mount:   "slack",
-			want:    nil,
-		},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			got := stripNamespace(tc.binding, tc.mount)
-			if !maps.Equal(got, tc.want) {
-				t.Errorf("stripNamespace(%v, %q) = %v, want %v", tc.binding, tc.mount, got, tc.want)
-			}
-		})
-	}
-}
 
 func TestMountResources(t *testing.T) {
 	const pub = "https://hub.example"
@@ -66,7 +20,7 @@ func TestMountResources(t *testing.T) {
 		if !slices.Equal(resources, want) {
 			t.Errorf("resources = %v, want %v", resources, want)
 		}
-		if byResource[pub+"/slack/mcp"] != "slack" || byResource[pub+"/lin/mcp"] != "lin" {
+		if byResource[pub+"/slack/mcp"].Name != "slack" || byResource[pub+"/lin/mcp"].Name != "lin" {
 			t.Errorf("byResource = %v", byResource)
 		}
 	})

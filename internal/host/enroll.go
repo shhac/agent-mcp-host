@@ -91,17 +91,3 @@ func (h *Host) buildEnrollment(m *Mount) (*oauth.Enrollment, error) {
 	}
 	return e, nil
 }
-
-// namespaceBinding is stripNamespace's inverse: the tool answers in its own
-// vocabulary (workspace=acme) and the host prefixes every key with the mount
-// name (slack:workspace=acme) before it lands on the shared record.
-func namespaceBinding(binding map[string]string, mount string) map[string]string {
-	if len(binding) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(binding))
-	for k, v := range binding {
-		out[mount+":"+k] = v
-	}
-	return out
-}
