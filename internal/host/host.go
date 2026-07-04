@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	oauth "github.com/shhac/lib-agent-oauth"
@@ -65,6 +66,7 @@ type Host struct {
 	enrollBridge func(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.EnrollResult, error)
 
 	mountByResource map[string]*Mount
+	emitMu          sync.Mutex // serializes NDJSON event lines on stdout
 }
 
 // New validates cfg and builds the host: the multi-audience Ed25519
@@ -97,8 +99,9 @@ func New(cfg Config) (*Host, error) {
 		Store:      cfg.Store,
 		PublicURL:  publicURL,
 		Resources:  resources,
-		Asymmetric: true,       // tools verify with the public key
-		SessionTTL: sessionTTL, // login once, grow into tools
+		Asymmetric: true,         // tools verify with the public key
+		SessionTTL: sessionTTL,   // login once, grow into tools
+		OnEvent:    h.oauthEvent, // AS lifecycle → NDJSON on stdout
 		// Project the namespaced binding down to each mount's own vocabulary:
 		// slack:workspace=acme → workspace=acme in the /slack/mcp token. An
 		// unknown resource passes through unchanged — never a stripNamespace
@@ -175,6 +178,10 @@ func (h *Host) Serve(ctx context.Context) error {
 		return err
 	}
 	h.printBanner()
+	for _, m := range h.mounts {
+		h.emit(hostEvent{Event: "mount_ready", Tool: m.Name, URL: h.resource(m)})
+	}
+	h.emit(hostEvent{Event: "ready"})
 
 	srv := &http.Server{Addr: h.addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -251,16 +258,18 @@ func (h *Host) proxy(m *Mount) http.Handler {
 	return http.StripPrefix("/"+m.Name, rp)
 }
 
-// printBanner writes the per-mount connector URLs and the shared pairing code.
+// printBanner writes the human-facing boot info — connector URLs and the
+// shared pairing code — to STDERR. Stdout is reserved for the NDJSON event
+// stream, and the pairing code is a secret that must never ride in it.
 func (h *Host) printBanner() {
 	code, _ := h.oauth.PairingCode()
 	_, _ = fmt.Fprintf(h.stderr, "agent-mcp-host ready · %d tool(s) · authorization: OAuth 2.1 (host)\n", len(h.mounts))
-	_, _ = fmt.Fprint(h.stdout, "Connect these MCP tools (add each URL as its own connector):\n")
+	_, _ = fmt.Fprint(h.stderr, "Connect these MCP tools (add each URL as its own connector):\n")
 	for _, m := range h.mounts {
-		_, _ = fmt.Fprintf(h.stdout, "  %-10s %s\n", m.Name, h.resource(m))
+		_, _ = fmt.Fprintf(h.stderr, "  %-10s %s\n", m.Name, h.resource(m))
 	}
-	_, _ = fmt.Fprintf(h.stdout, "  pairing code : %s\n", code)
-	_, _ = fmt.Fprint(h.stdout, "  ⚠ Treat the pairing code like a password. Enter it once in the browser —\n"+
+	_, _ = fmt.Fprintf(h.stderr, "  pairing code : %s\n", code)
+	_, _ = fmt.Fprint(h.stderr, "  ⚠ Treat the pairing code like a password. Enter it once in the browser —\n"+
 		"    a session then covers connecting the other tools without re-entering it.\n")
 }
 

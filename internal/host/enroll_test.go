@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	oauth "github.com/shhac/lib-agent-oauth"
@@ -22,7 +24,9 @@ import (
 func TestHostEnrollmentEndToEnd(t *testing.T) {
 	store := oauth.NewMemStore()
 	var bridged oauth.EnrollRequest
+	var events safeBuffer // stdout: the NDJSON event stream
 	_, front := buildTestHostWith(t, store, func(h *Host) {
+		h.stdout = &events
 		h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
 			manifest := &toolManifest{Name: m.Name, Version: "test"}
 			if m.Name == "slack" {
@@ -141,6 +145,53 @@ func TestHostEnrollmentEndToEnd(t *testing.T) {
 	if b, _ := body["binding"].(map[string]any); body["principal"] != "alice" || b["workspace"] != "acme" || b["slack:workspace"] != nil {
 		t.Errorf("slack call after enrollment = %v, want projected workspace=acme", body)
 	}
+
+	// Stdout is a pure NDJSON event stream: every line parses, the lifecycle
+	// moments appear with the mount name (not the audience URL), and no
+	// secret ever rides in it.
+	stream := events.String()
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(stream), "\n") {
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("stdout line is not JSON: %q (%v)", line, err)
+		}
+		kind, _ := ev["event"].(string)
+		seen[kind] = true
+		if kind == "enrolled" && (ev["tool"] != "slack" || ev["principal"] != "alice") {
+			t.Errorf("enrolled event = %v, want tool=slack principal=alice", ev)
+		}
+		if kind == "paired" && ev["via"] != "code" {
+			t.Errorf("paired event = %v, want via=code", ev)
+		}
+	}
+	for _, want := range []string{"client_registered", "paired", "session_started", "enrolled", "authorized"} {
+		if !seen[want] {
+			t.Errorf("event stream missing %q; stream:\n%s", want, stream)
+		}
+	}
+	if strings.Contains(stream, "xoxc-sekrit") || strings.Contains(stream, aliceCode) {
+		t.Errorf("event stream leaked a secret:\n%s", stream)
+	}
+}
+
+// safeBuffer is a mutex-guarded bytes.Buffer: events are written from request
+// handlers while the test goroutine later reads.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // A mount without a descriptor has no enrollment: an unbound principal is not
