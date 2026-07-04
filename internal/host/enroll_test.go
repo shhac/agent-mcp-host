@@ -100,6 +100,17 @@ func TestHostEnrollmentEndToEnd(t *testing.T) {
 	if bridged.Principal != "alice" || bridged.Values["token"] != "xoxc-sekrit" {
 		t.Errorf("bridge received %+v", bridged)
 	}
+	// The host enables AS sessions: completing the code-entered flow sets the
+	// login-once cookie, so connecting the next tool skips the code.
+	sessionSet := false
+	for _, c := range az.Cookies() {
+		if strings.HasPrefix(c.Name, "__Host-") && c.HttpOnly && c.Secure {
+			sessionSet = true
+		}
+	}
+	if !sessionSet {
+		t.Error("no __Host- session cookie after the code-entered enrollment flow")
+	}
 
 	// The record merged: slack's namespaced slice landed, lin's survived.
 	principals, err := oauth.NewPairing(store).Principals()

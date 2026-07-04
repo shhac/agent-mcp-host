@@ -224,6 +224,14 @@ enrolling only what's new. Revocation (`pair remove alice`) drops the session
 and every principal token at once; the session's lifetime is bounded like any
 access grant.
 
+**Built (lib-agent-oauth v0.6.0 / host v0.3.0):** `oauth.Config.SessionTTL`
+enables the session store; the host sets 30 days. Mechanics as designed, plus:
+the session record stores only the principal *name*, re-resolved from the
+pairing store on every use (a removed principal's session dies even before the
+purge; bindings are always current); an entered pairing code always wins over
+a session; a session-resumed flow never re-issues the cookie; the cookie is
+`__Host-`-prefixed (Secure, HttpOnly, SameSite=Lax, Path=/).
+
 ## Namespaced bindings & per-tool audiences
 
 The operator provisions a person once, family-wide:

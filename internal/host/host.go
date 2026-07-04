@@ -20,6 +20,12 @@ import (
 	oauth "github.com/shhac/lib-agent-oauth"
 )
 
+// sessionTTL is how long one pairing-code entry keeps covering new tool
+// connections in the same browser (the AS session cookie's lifetime). Long,
+// because the person it identifies proved membership with a per-person
+// secret and revocation is immediate: `pair remove` kills the session.
+const sessionTTL = 30 * 24 * time.Hour
+
 // Config configures a Host.
 type Config struct {
 	// PublicURL is the externally-reachable https URL the connectors reach —
@@ -91,7 +97,8 @@ func New(cfg Config) (*Host, error) {
 		Store:      cfg.Store,
 		PublicURL:  publicURL,
 		Resources:  resources,
-		Asymmetric: true, // tools verify with the public key
+		Asymmetric: true,       // tools verify with the public key
+		SessionTTL: sessionTTL, // login once, grow into tools
 		// Project the namespaced binding down to each mount's own vocabulary:
 		// slack:workspace=acme → workspace=acme in the /slack/mcp token. An
 		// unknown resource passes through unchanged — never a stripNamespace
@@ -253,7 +260,8 @@ func (h *Host) printBanner() {
 		_, _ = fmt.Fprintf(h.stdout, "  %-10s %s\n", m.Name, h.resource(m))
 	}
 	_, _ = fmt.Fprintf(h.stdout, "  pairing code : %s\n", code)
-	_, _ = fmt.Fprint(h.stdout, "  ⚠ Treat the pairing code like a password. Enter it once; it works across tools.\n")
+	_, _ = fmt.Fprint(h.stdout, "  ⚠ Treat the pairing code like a password. Enter it once in the browser —\n"+
+		"    a session then covers connecting the other tools without re-entering it.\n")
 }
 
 func orWriter(w, dflt io.Writer) io.Writer {
