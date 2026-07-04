@@ -51,7 +51,9 @@ agent-mcp-host serve --tailscale funnel \
 
 There is no separate step to start the tools: `serve` spawns each one in
 delegate mode with everything it needs injected — the binaries just have to
-be installed.
+be installed. To run a tool under your own control instead (debugger,
+launchd), use an **attach mount**: `agent-mcp-host mount-env lin=lin` prints
+the exact launch command, then `--mount lin=lin@127.0.0.1:9410` proxies to it.
 
 Each mounted tool is spawned as `<binary> mcp --http 127.0.0.1:<port>
 --oauth <public-url>` — delegate mode: the tool validates the host's Ed25519

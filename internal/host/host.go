@@ -53,7 +53,7 @@ type Host struct {
 	stderr    io.Writer
 	stdout    io.Writer
 
-	// start brings a mount's tool up (sets m.port), defaulting to the exec
+	// start brings a mount's tool up (sets m.addr), defaulting to the exec
 	// spawn of `<binary> mcp --http … --oauth …`. Tests replace it with an
 	// in-process delegate server to exercise the AS + proxy without exec.
 	start func(ctx context.Context, m *Mount, verifyKey string) error
@@ -235,6 +235,13 @@ func (h *Host) bringUpMount(ctx context.Context, m *Mount, verifyKey string) err
 	if m.enrollment, err = h.buildEnrollment(m); err != nil {
 		return err
 	}
+	// Attach mounts proxy to a listener the operator runs themselves (launched
+	// with the env `mount-env` prints); everything else — discovery above,
+	// enrollment, readiness below — is identical to a spawned mount.
+	if m.Attach != "" {
+		m.addr = m.Attach
+		return nil
+	}
 	if err := h.start(ctx, m, verifyKey); err != nil {
 		return fmt.Errorf("mount %q: %w", m.Name, err)
 	}
@@ -244,7 +251,7 @@ func (h *Host) bringUpMount(ctx context.Context, m *Mount, verifyKey string) err
 // proxy reverse-proxies a mount's /<name>/mcp to its loopback /mcp, stripping
 // the tool's CORS headers so the host is the single source of them.
 func (h *Host) proxy(m *Mount) http.Handler {
-	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", m.port)}
+	target := &url.URL{Scheme: "http", Host: m.addr}
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.ModifyResponse = func(resp *http.Response) error {
 		for k := range resp.Header {

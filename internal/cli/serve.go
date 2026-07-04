@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/shhac/lib-agent-mcp/tailscale"
@@ -75,7 +76,7 @@ func newServeCmd(globals *GlobalFlags) *cobra.Command {
 		`front the host with a Tailscale tunnel: "funnel" (public internet) or "serve" (tailnet-private). `+
 			"Derives --public-url from the node's MagicDNS name when unset; tears the tunnel down on exit.")
 	cmd.Flags().IntVar(&tailscalePort, "tailscale-port", 443, "public HTTPS port for --tailscale (443, 8443, or 10000)")
-	cmd.Flags().StringArrayVar(&mounts, "mount", nil, "mount a family tool as name=binary (repeatable), e.g. --mount slack=agent-slack")
+	cmd.Flags().StringArrayVar(&mounts, "mount", nil, "mount a family tool as name=binary (spawned), or name=binary@host:port to attach to a listener you run yourself (see mount-env); repeatable")
 	return cmd
 }
 
@@ -87,11 +88,24 @@ func parseMounts(specs []string) ([]*host.Mount, error) {
 	}
 	mounts := make([]*host.Mount, 0, len(specs))
 	for _, s := range specs {
-		name, binary, ok := strings.Cut(s, "=")
-		if !ok || name == "" || binary == "" {
-			return nil, agenterrors.Newf(agenterrors.FixableByAgent, "--mount %q is not name=binary", s)
+		name, target, ok := strings.Cut(s, "=")
+		if !ok || name == "" || target == "" {
+			return nil, agenterrors.Newf(agenterrors.FixableByAgent, "--mount %q is not name=binary or name=binary@host:port", s)
 		}
-		mounts = append(mounts, &host.Mount{Name: name, Binary: binary})
+		// name=binary spawns the tool; name=binary@host:port attaches to a
+		// listener the operator runs themselves (see `mount-env`). The binary
+		// is needed either way — schema discovery and the enrollment bridge
+		// exec it.
+		binary, attach, attached := strings.Cut(target, "@")
+		if binary == "" || (attached && attach == "") {
+			return nil, agenterrors.Newf(agenterrors.FixableByAgent, "--mount %q is not name=binary or name=binary@host:port", s)
+		}
+		if attached {
+			if _, _, err := net.SplitHostPort(attach); err != nil {
+				return nil, agenterrors.Newf(agenterrors.FixableByAgent, "--mount %q: attach target %q is not host:port", s, attach)
+			}
+		}
+		mounts = append(mounts, &host.Mount{Name: name, Binary: binary, Attach: attach})
 	}
 	return mounts, nil
 }

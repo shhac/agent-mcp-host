@@ -31,6 +31,18 @@ TOOLS ARE LAUNCHED FOR YOU
   (e.g. brew install shhac/tap/agent-slack) and named in --mount; stopping
   the host stops them.
 
+RUN A TOOL YOURSELF (attach mounts)
+  To run a tool under your own control (debugger, launchd, …) instead of
+  having serve spawn it:
+      agent-mcp-host mount-env lin=lin --http 127.0.0.1:9410 --tailscale funnel
+        → prints the exact launch command (env + flags) for that tool
+      # run it, then:
+      agent-mcp-host serve --tailscale funnel --mount lin=lin@127.0.0.1:9410 …
+  The binary name is still required — the host execs it for 'mcp schema' and
+  'mcp enroll'. Everything else (auth, enrollment, projection) is identical
+  to a spawned mount. mount-env's --public-url/--tailscale must match what
+  serve runs with (--tailscale here only derives the URL; no tunnel starts).
+
 OUTPUT CONTRACT
   stdout  NDJSON event stream, one line per lifecycle moment:
           {"event":"ready"|"mount_ready"|"client_registered"|"paired"|

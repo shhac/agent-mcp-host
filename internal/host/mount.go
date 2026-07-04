@@ -21,10 +21,15 @@ type Mount struct {
 	// → https://host/slack/mcp.
 	Name string
 	// Binary is the CLI executable to run, e.g. "agent-slack" (resolved on PATH)
-	// or an absolute path.
+	// or an absolute path. Attach mounts still need it: the host execs it for
+	// `mcp schema` (the descriptor) and `mcp enroll` (the credential bridge).
 	Binary string
+	// Attach, when set (host:port), proxies to an ALREADY-RUNNING delegate
+	// listener instead of spawning one — the operator launched the tool
+	// themselves (debugger, launchd, …) with the env `mount-env` prints.
+	Attach string
 
-	port int // loopback port the spawned tool listens on
+	addr string // target host:port the proxy forwards to
 	proc *exec.Cmd
 
 	// descriptor is the tool's credential-enrollment form, discovered from
@@ -42,9 +47,9 @@ func (h *Host) spawn(ctx context.Context, m *Mount, verifyKey string) error {
 	if err != nil {
 		return err
 	}
-	m.port = port
+	m.addr = fmt.Sprintf("127.0.0.1:%d", port)
 	cmd := exec.CommandContext(ctx, m.Binary, "mcp",
-		"--http", fmt.Sprintf("127.0.0.1:%d", port),
+		"--http", m.addr,
 		"--oauth", h.publicURL)
 	cmd.Env = append(os.Environ(),
 		"AGENT_MCP_OAUTH_RESOURCE="+h.resource(m),
@@ -70,7 +75,7 @@ func (h *Host) stop(m *Mount) {
 func (h *Host) waitReady(ctx context.Context) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for _, m := range h.mounts {
-		url := fmt.Sprintf("http://127.0.0.1:%d/mcp", m.port)
+		url := fmt.Sprintf("http://%s/mcp", m.addr)
 		if err := waitMountReady(ctx, url, deadline); err != nil {
 			return fmt.Errorf("mount %q: %w", m.Name, err)
 		}

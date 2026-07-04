@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -68,7 +67,7 @@ func buildTestHostWith(t *testing.T, store oauth.SecretStore, configure func(h *
 		ts := fakeTool(t, h, m, verifyKey)
 		fakes[m.Name] = ts
 		u, _ := url.Parse(ts.URL)
-		m.port = mustAtoi(t, u.Port())
+		m.addr = u.Host
 		return nil
 	}
 	h.stopMount = func(m *Mount) {
@@ -224,15 +223,6 @@ func callMount(t *testing.T, front *httptest.Server, path, token string) map[str
 	return body
 }
 
-func mustAtoi(t *testing.T, s string) int {
-	t.Helper()
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		t.Fatalf("atoi %q: %v", s, err)
-	}
-	return n
-}
-
 // The host is the single source of CORS: a proxied tool's own Access-Control-*
 // response headers are stripped, and the host's are substituted — otherwise a
 // tool could widen CORS behind the host's back.
@@ -257,7 +247,7 @@ func TestHostStripsProxiedToolCORSHeaders(t *testing.T) {
 	}
 	h.start = func(_ context.Context, m *Mount, _ string) error {
 		u, _ := url.Parse(tool.URL)
-		m.port = mustAtoi(t, u.Port())
+		m.addr = u.Host
 		return nil
 	}
 	h.stopMount = func(*Mount) {}
@@ -283,5 +273,54 @@ func TestHostStripsProxiedToolCORSHeaders(t *testing.T) {
 	}
 	if got := resp.Header.Get("Access-Control-Max-Age"); got != "600" {
 		t.Errorf("Access-Control-Max-Age = %q, want the host's 600 (tool's 999 not stripped?)", got)
+	}
+}
+
+// An attach mount proxies to a listener the operator runs themselves: the
+// host never spawns it, but discovery, auth, and projection work identically.
+func TestHostAttachMount(t *testing.T) {
+	store := oauth.NewMemStore()
+	m := &Mount{Name: "lin", Binary: "unused-in-test"}
+	h, err := New(Config{
+		PublicURL: hostPublicURL, Addr: "127.0.0.1:0", Store: store,
+		Mounts: []*Mount{m}, Stderr: io.Discard, Stdout: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// The "operator-run" tool: a real delegate RS listener started outside the
+	// host, exactly what `mount-env` would have them launch.
+	verifyKey := base64.RawURLEncoding.EncodeToString(h.oauth.PublicKey())
+	tool := fakeTool(t, h, m, verifyKey)
+	t.Cleanup(tool.Close)
+	u, _ := url.Parse(tool.URL)
+	m.Attach = u.Host
+
+	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
+		return &toolManifest{Name: m.Name, Version: "test"}, nil
+	}
+	h.start = func(context.Context, *Mount, string) error {
+		t.Error("an attach mount must not be spawned")
+		return nil
+	}
+	h.stopMount = func(*Mount) {}
+	handler, cleanup, err := h.handler(context.Background())
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	front := httptest.NewServer(handler)
+	t.Cleanup(func() { front.Close(); cleanup() })
+
+	code, err := oauth.NewPairing(store).AddPrincipal("bob", map[string]string{"lin:workspace": "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := runOAuthFlow(t, front, code, hostPublicURL+"/lin/mcp")
+	body := callMount(t, front, "/lin/mcp", tok)
+	if body["tool"] != "lin" || body["principal"] != "bob" {
+		t.Errorf("attach-mount call = %v", body)
+	}
+	if b, _ := body["binding"].(map[string]any); b["workspace"] != "acme" {
+		t.Errorf("attach-mount binding not projected: %v", body["binding"])
 	}
 }

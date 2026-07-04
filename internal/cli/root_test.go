@@ -39,3 +39,21 @@ func TestServeRequiresMount(t *testing.T) {
 		t.Errorf("unexpected serve error: %v", err)
 	}
 }
+
+func TestParseMountsAttach(t *testing.T) {
+	mounts, err := parseMounts([]string{"slack=agent-slack", "lin=lin@127.0.0.1:9410"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mounts[0].Attach != "" || mounts[0].Binary != "agent-slack" {
+		t.Errorf("spawn mount = %+v", mounts[0])
+	}
+	if mounts[1].Attach != "127.0.0.1:9410" || mounts[1].Binary != "lin" {
+		t.Errorf("attach mount = %+v", mounts[1])
+	}
+	for _, bad := range []string{"lin=lin@", "lin=@127.0.0.1:9410", "lin=lin@no-port"} {
+		if _, err := parseMounts([]string{bad}); err == nil {
+			t.Errorf("parseMounts(%q) should error", bad)
+		}
+	}
+}

@@ -30,7 +30,7 @@ func newRootCmd(version string) *cobra.Command {
 		UnknownHint:   "run 'agent-mcp-host --help' for available commands",
 	})
 
-	root.AddCommand(newServeCmd(globals), newPairCmd(), newUsageCmd())
+	root.AddCommand(newServeCmd(globals), newPairCmd(), newUsageCmd(), newMountEnvCmd())
 	return root
 }
 
