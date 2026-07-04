@@ -24,20 +24,18 @@ func TestRootScaffold(t *testing.T) {
 	}
 }
 
-// The serve stub returns a structured, human-fixable error (not a bare string),
-// honoring the family error contract even while unimplemented.
-func TestServeStubIsStructured(t *testing.T) {
+// serve requires at least one --mount, and surfaces a structured error (not a
+// bare string) when none is given, honoring the family error contract.
+func TestServeRequiresMount(t *testing.T) {
 	root := newRootCmd("t")
 	var out, errBuf bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
 	root.SetArgs([]string{"serve"})
 
-	// libcli renders the error; we assert the command surfaces one rather than
-	// succeeding as a no-op.
 	if err := root.Execute(); err == nil {
-		t.Fatal("serve stub should return an error until implemented")
-	} else if !strings.Contains(err.Error(), "not implemented") {
+		t.Fatal("serve without --mount should error")
+	} else if !strings.Contains(err.Error(), "--mount") {
 		t.Errorf("unexpected serve error: %v", err)
 	}
 }

@@ -5,3 +5,7 @@ coverage.out
 .DS_Store
 .env*
 .ai-cache/
+
+# Go workspace (local multi-lib dev; never committed)
+go.work
+go.work.sum
