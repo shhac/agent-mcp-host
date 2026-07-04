@@ -52,6 +52,13 @@ type Host struct {
 	start func(ctx context.Context, m *Mount, verifyKey string) error
 	// stopMount tears a mount down, defaulting to killing the spawned process.
 	stopMount func(m *Mount)
+	// discover reads a mount's manifest, defaulting to `<binary> mcp schema`.
+	discover func(ctx context.Context, m *Mount) (*toolManifest, error)
+	// enrollBridge hands one enrollment submission to the tool, defaulting to
+	// `<binary> mcp enroll` with the request on stdin.
+	enrollBridge func(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.EnrollResult, error)
+
+	mountByResource map[string]*Mount
 }
 
 // New validates cfg and builds the host: the multi-audience Ed25519
@@ -72,11 +79,15 @@ func New(cfg Config) (*Host, error) {
 		return nil, err
 	}
 	h := &Host{
-		publicURL: publicURL,
-		addr:      cfg.Addr,
-		mounts:    cfg.Mounts,
-		stderr:    orWriter(cfg.Stderr, os.Stderr),
-		stdout:    orWriter(cfg.Stdout, os.Stdout),
+		publicURL:       publicURL,
+		addr:            cfg.Addr,
+		mounts:          cfg.Mounts,
+		stderr:          orWriter(cfg.Stderr, os.Stderr),
+		stdout:          orWriter(cfg.Stdout, os.Stdout),
+		mountByResource: make(map[string]*Mount, len(cfg.Mounts)),
+	}
+	for _, m := range cfg.Mounts {
+		h.mountByResource[mountResource(publicURL, m.Name)] = m
 	}
 
 	srv, err := oauth.New(oauth.Config{
@@ -89,6 +100,14 @@ func New(cfg Config) (*Host, error) {
 		BindingForResource: func(binding map[string]string, resource string) map[string]string {
 			return stripNamespace(binding, resourceMount[resource])
 		},
+		// Each mount's own enrollment (built from its discovered descriptor in
+		// handler, validated there), resolved lazily per authorize request.
+		EnrollmentForResource: func(resource string) *oauth.Enrollment {
+			if m := h.mountByResource[resource]; m != nil {
+				return m.enrollment
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -96,6 +115,8 @@ func New(cfg Config) (*Host, error) {
 	h.oauth = srv
 	h.start = h.spawn
 	h.stopMount = h.stop
+	h.discover = discoverExec
+	h.enrollBridge = enrollExec
 	return h, nil
 }
 
@@ -175,6 +196,19 @@ func (h *Host) handler(ctx context.Context) (http.Handler, func(), error) {
 		}
 	}
 	for _, m := range h.mounts {
+		// Discover the manifest first: the descriptor feeds the AS's
+		// per-resource enrollment, which must be in place before the first
+		// authorize request can arrive.
+		manifest, err := h.discover(ctx, m)
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("mount %q: %w", m.Name, err)
+		}
+		m.descriptor = manifest.CredentialDescriptor
+		if m.enrollment, err = h.buildEnrollment(m); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
 		if err := h.start(ctx, m, verifyKey); err != nil {
 			cleanup()
 			return nil, nil, fmt.Errorf("mount %q: %w", m.Name, err)

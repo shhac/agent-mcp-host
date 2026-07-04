@@ -41,6 +41,13 @@ func fakeTool(t *testing.T, h *Host, m *Mount, verifyKey string) *httptest.Serve
 // buildTestHost wires a host over store with in-process fake tools for each
 // mount (no exec, no keyring) and returns it plus its front-door test server.
 func buildTestHost(t *testing.T, store oauth.SecretStore, names ...string) (*Host, *httptest.Server) {
+	return buildTestHostWith(t, store, nil, names...)
+}
+
+// buildTestHostWith is buildTestHost with a configure hook that runs after the
+// exec seams are stubbed and before the handler is built — enrollment tests
+// override discover/enrollBridge there.
+func buildTestHostWith(t *testing.T, store oauth.SecretStore, configure func(h *Host), names ...string) (*Host, *httptest.Server) {
 	t.Helper()
 	mounts := make([]*Mount, len(names))
 	for i, n := range names {
@@ -54,6 +61,9 @@ func buildTestHost(t *testing.T, store oauth.SecretStore, names ...string) (*Hos
 		t.Fatalf("New: %v", err)
 	}
 	fakes := map[string]*httptest.Server{}
+	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
+		return &toolManifest{Name: m.Name, Version: "test"}, nil // no descriptor: not self-serve
+	}
 	h.start = func(_ context.Context, m *Mount, verifyKey string) error {
 		ts := fakeTool(t, h, m, verifyKey)
 		fakes[m.Name] = ts
@@ -65,6 +75,9 @@ func buildTestHost(t *testing.T, store oauth.SecretStore, names ...string) (*Hos
 		if ts := fakes[m.Name]; ts != nil {
 			ts.Close()
 		}
+	}
+	if configure != nil {
+		configure(h)
 	}
 	handler, cleanup, err := h.handler(context.Background())
 	if err != nil {
@@ -239,6 +252,9 @@ func TestHostStripsProxiedToolCORSHeaders(t *testing.T) {
 		_, _ = io.WriteString(w, "ok")
 	}))
 	t.Cleanup(tool.Close)
+	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
+		return &toolManifest{Name: m.Name, Version: "test"}, nil
+	}
 	h.start = func(_ context.Context, m *Mount, _ string) error {
 		u, _ := url.Parse(tool.URL)
 		m.port = mustAtoi(t, u.Port())

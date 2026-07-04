@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	oauth "github.com/shhac/lib-agent-oauth"
 )
 
 // Mount is one family tool served behind a path.
@@ -22,8 +24,15 @@ type Mount struct {
 	// or an absolute path.
 	Binary string
 
-	port int      // loopback port the spawned tool listens on
+	port int // loopback port the spawned tool listens on
 	proc *exec.Cmd
+
+	// descriptor is the tool's credential-enrollment form, discovered from
+	// `mcp schema` at boot; nil when the tool is not self-serve.
+	descriptor *oauth.CredentialDescriptor
+	// enrollment is the per-resource enrollment built over descriptor (nil
+	// without one), handed to the AS via EnrollmentForResource.
+	enrollment *oauth.Enrollment
 }
 
 // spawn allocates a loopback port and starts the tool's MCP server in delegate
