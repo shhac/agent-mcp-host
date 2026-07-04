@@ -1,11 +1,10 @@
 package host
 
 import (
-	"encoding/json"
-	"fmt"
 	"time"
 
 	oauth "github.com/shhac/lib-agent-oauth"
+	output "github.com/shhac/lib-agent-output"
 )
 
 // The host's stdout is an NDJSON event stream (the family's list contract):
@@ -25,17 +24,16 @@ type hostEvent struct {
 	Time      string `json:"time"`
 }
 
-// emit writes one event line. Serialized: events arrive from concurrent
-// request handlers.
+// emit writes one event line through the family's output package, so the
+// stream honors --color (colorized JSON on a terminal, plain when piped —
+// same as every list command in the family). Serialized: events arrive from
+// concurrent request handlers. An event is telemetry, never worth failing a
+// flow over, so the write error is dropped.
 func (h *Host) emit(ev hostEvent) {
 	ev.Time = time.Now().UTC().Format(time.RFC3339)
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return // an event is telemetry, never worth failing a flow over
-	}
 	h.emitMu.Lock()
 	defer h.emitMu.Unlock()
-	_, _ = fmt.Fprintln(h.stdout, string(line))
+	_ = output.Print(h.stdout, ev, output.FormatNDJSON, nil)
 }
 
 // oauthEvent adapts the AS's lifecycle events onto the stream, translating
