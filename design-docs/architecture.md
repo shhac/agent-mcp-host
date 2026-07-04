@@ -198,6 +198,32 @@ So `oauth/` is extracted into a new sibling **`lib-agent-oauth`**:
 
 This is the "if you feel we should split a library, do it" case, pre-approved.
 
+## Login once, grow into tools (AS session + incremental authorization)
+
+Per-tool audiences mean per-tool **tokens** — unavoidable, since the connector
+binds a token's audience to the exact `/…/mcp` URL it calls and each tool is a
+separate connector. But a person should not re-prove their identity for every
+tool. So the host AS is built **session-first**, following the standard OAuth
+SSO + incremental-authorization pattern:
+
+- **The pairing code establishes an AS session, not just one token.** On the
+  first tool's approval, entering the code sets a secure session cookie
+  (HttpOnly, Secure, SameSite) tied to the verified principal.
+- **Subsequent tools reuse the session.** When the same person adds a second
+  connector (`/lin/mcp`), its OAuth flow reaches the same AS, which recognizes
+  the session, **skips the pairing-code step**, and prompts only for the
+  *delta* — the new tool's credential enrollment, if the principal has no
+  binding for it yet. They keep every tool they already have.
+- **The tokens stay separate and audience-bound.** The session shares the
+  *identity proof*, never the tokens: each tool still gets its own
+  audience-scoped token from its own flow. Growing to tool N reuses the
+  session, enrolls only tool N, and leaves tools 1..N-1 untouched.
+
+Net: enter the pairing code once, prove identity once, grow into each tool by
+enrolling only what's new. Revocation (`pair remove alice`) drops the session
+and every principal token at once; the session's lifetime is bounded like any
+access grant.
+
 ## Namespaced bindings & per-tool audiences
 
 The operator provisions a person once, family-wide:
