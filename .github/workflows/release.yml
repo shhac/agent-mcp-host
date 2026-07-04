@@ -19,5 +19,5 @@ jobs:
       desc: "One-origin MCP host for the agent-* CLI family"
       formula_class: AgentMcpHost
       help_match: "MCP host"
-      # The repo is PolyForm Perimeter, not the workflow's MIT default.
-      license: "PolyForm-Perimeter-1.0.0"
+      # license: deliberately not pinned — the shared workflow detects
+      # LicenseRef-PolyForm-Perimeter-1.0.0 from this repo's LICENSE file.
