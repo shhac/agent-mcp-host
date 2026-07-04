@@ -54,7 +54,7 @@ func enrollExec(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.E
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		if msg := toolErrorMessage(stderr.Bytes()); msg != "" {
 			return oauth.EnrollResult{}, fmt.Errorf("%s", msg)
 		}
 		return oauth.EnrollResult{}, fmt.Errorf("%s mcp enroll: %w", m.Binary, err)
@@ -64,6 +64,21 @@ func enrollExec(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.E
 		return oauth.EnrollResult{}, fmt.Errorf("parsing %s mcp enroll output: %w", m.Binary, err)
 	}
 	return res, nil
+}
+
+// toolErrorMessage extracts the human-facing message from a tool's stderr.
+// Family CLIs emit their structured-error contract — JSON with an "error"
+// field — which would otherwise reach the browser form as a raw JSON blob;
+// plain-text stderr passes through trimmed.
+func toolErrorMessage(stderr []byte) string {
+	msg := strings.TrimSpace(string(stderr))
+	var structured struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(msg), &structured); err == nil && structured.Error != "" {
+		return structured.Error
+	}
+	return msg
 }
 
 // buildEnrollment constructs a mount's per-resource enrollment from its

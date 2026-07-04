@@ -45,6 +45,10 @@ func helperProcess() {
 	case "enroll-reject":
 		fmt.Fprintln(os.Stderr, "invalid token: workspace not reachable")
 		os.Exit(1)
+	case "enroll-reject-structured":
+		// The family CLIs' structured-error contract on stderr.
+		fmt.Fprintln(os.Stderr, `{"error":"auth.test failed: invalid_auth","fixable_by":"human","hint":"re-copy the token"}`)
+		os.Exit(1)
 	case "enroll-die-silent":
 		os.Exit(3)
 	}
@@ -102,6 +106,17 @@ func TestEnrollExecStderrBecomesFormError(t *testing.T) {
 	_, err := enrollExec(t.Context(), m, oauth.EnrollRequest{Principal: "alice"})
 	if err == nil || err.Error() != "invalid token: workspace not reachable" {
 		t.Errorf("error = %v, want the tool's exact stderr message", err)
+	}
+}
+
+// A family CLI's structured JSON error on stderr is unwrapped to its "error"
+// field — the human sees "auth.test failed: invalid_auth" on the form, not a
+// raw JSON blob.
+func TestEnrollExecStructuredStderrUnwrapped(t *testing.T) {
+	m := helperMount(t, "enroll-reject-structured")
+	_, err := enrollExec(t.Context(), m, oauth.EnrollRequest{Principal: "alice"})
+	if err == nil || err.Error() != "auth.test failed: invalid_auth" {
+		t.Errorf("error = %v, want the unwrapped structured message", err)
 	}
 }
 
