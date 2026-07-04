@@ -10,6 +10,8 @@ import (
 	oauth "github.com/shhac/lib-agent-oauth"
 	agenterrors "github.com/shhac/lib-agent-output"
 	"github.com/spf13/cobra"
+
+	"github.com/shhac/agent-mcp-host/internal/host"
 )
 
 // newMountEnvCmd is `mount-env <name>=<binary>`: it prints the exact command
@@ -58,7 +60,7 @@ func newMountEnvCmd() *cobra.Command {
 				return err
 			}
 			verifyKey := base64.RawURLEncoding.EncodeToString(issuer.PublicKey())
-			resource := publicURL + "/" + name + "/mcp"
+			resource := host.MountResource(publicURL, name)
 
 			_, err = fmt.Fprintf(cmd.OutOrStdout(),
 				"# Run the tool yourself, then serve with: --mount %s=%s@%s\n"+

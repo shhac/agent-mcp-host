@@ -48,7 +48,7 @@ func (h *Host) oauthEvent(e oauth.Event) {
 		Via:       e.Via,
 	}
 	if m := h.mountByResource[e.Resource]; m != nil {
-		ev.Tool = m.Name
+		ev.Tool = m.cfg.Name
 	}
 	h.emit(ev)
 }

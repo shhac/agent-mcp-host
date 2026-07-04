@@ -55,7 +55,7 @@ func helperProcess() {
 }
 
 // helperMount points a mount at this test binary, re-exec'd with behavior.
-func helperMount(t *testing.T, behavior string) *Mount {
+func helperMount(t *testing.T, behavior string) *runningMount {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -63,7 +63,7 @@ func helperMount(t *testing.T, behavior string) *Mount {
 	}
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	t.Setenv("GO_HELPER_BEHAVIOR", behavior)
-	return &Mount{Name: "fake", Binary: exe}
+	return &runningMount{cfg: &Mount{Name: "fake", Binary: exe}}
 }
 
 func TestDiscoverExecParsesManifest(t *testing.T) {
@@ -138,12 +138,12 @@ func TestHandlerRejectsInvalidDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
-		return &toolManifest{Name: m.Name, CredentialDescriptor: &oauth.CredentialDescriptor{
+	h.discover = func(_ context.Context, m *runningMount) (*toolManifest, error) {
+		return &toolManifest{Name: m.cfg.Name, CredentialDescriptor: &oauth.CredentialDescriptor{
 			Modes: []oauth.CredentialMode{{Key: "broken"}}, // mode with no fields
 		}}, nil
 	}
-	h.start = func(context.Context, *Mount, string) error {
+	h.start = func(context.Context, *runningMount, string) error {
 		t.Error("start must not run after a descriptor failure")
 		return nil
 	}

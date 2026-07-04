@@ -19,7 +19,7 @@ const hostPublicURL = "https://hub.example"
 
 // fakeTool starts an in-process delegate MCP server for a mount: it validates
 // the host's token for the mount's audience and echoes the caller's principal.
-func fakeTool(t *testing.T, h *Host, m *Mount, verifyKey string) *httptest.Server {
+func fakeTool(t *testing.T, h *Host, m *runningMount, verifyKey string) *httptest.Server {
 	t.Helper()
 	key, err := base64.RawURLEncoding.DecodeString(verifyKey)
 	if err != nil {
@@ -27,12 +27,12 @@ func fakeTool(t *testing.T, h *Host, m *Mount, verifyKey string) *httptest.Serve
 	}
 	rs, err := oauth.NewResourceServer(oauth.RSConfig{IssuerURL: h.publicURL, Resource: h.resource(m), VerifyKey: key})
 	if err != nil {
-		t.Fatalf("fake tool %q RS: %v", m.Name, err)
+		t.Fatalf("fake tool %q RS: %v", m.cfg.Name, err)
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", rs.Protect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		v, _ := oauth.PrincipalFrom(r.Context())
-		_ = json.NewEncoder(w).Encode(map[string]any{"tool": m.Name, "principal": v.Name, "binding": v.Binding})
+		_ = json.NewEncoder(w).Encode(map[string]any{"tool": m.cfg.Name, "principal": v.Name, "binding": v.Binding})
 	})))
 	return httptest.NewServer(mux)
 }
@@ -60,18 +60,18 @@ func buildTestHostWith(t *testing.T, store oauth.SecretStore, configure func(h *
 		t.Fatalf("New: %v", err)
 	}
 	fakes := map[string]*httptest.Server{}
-	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
-		return &toolManifest{Name: m.Name, Version: "test"}, nil // no descriptor: not self-serve
+	h.discover = func(_ context.Context, m *runningMount) (*toolManifest, error) {
+		return &toolManifest{Name: m.cfg.Name, Version: "test"}, nil // no descriptor: not self-serve
 	}
-	h.start = func(_ context.Context, m *Mount, verifyKey string) error {
+	h.start = func(_ context.Context, m *runningMount, verifyKey string) error {
 		ts := fakeTool(t, h, m, verifyKey)
-		fakes[m.Name] = ts
+		fakes[m.cfg.Name] = ts
 		u, _ := url.Parse(ts.URL)
 		m.addr = u.Host
 		return nil
 	}
-	h.stopMount = func(m *Mount) {
-		if ts := fakes[m.Name]; ts != nil {
+	h.stopMount = func(m *runningMount) {
+		if ts := fakes[m.cfg.Name]; ts != nil {
 			ts.Close()
 		}
 	}
@@ -242,15 +242,15 @@ func TestHostStripsProxiedToolCORSHeaders(t *testing.T) {
 		_, _ = io.WriteString(w, "ok")
 	}))
 	t.Cleanup(tool.Close)
-	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
-		return &toolManifest{Name: m.Name, Version: "test"}, nil
+	h.discover = func(_ context.Context, m *runningMount) (*toolManifest, error) {
+		return &toolManifest{Name: m.cfg.Name, Version: "test"}, nil
 	}
-	h.start = func(_ context.Context, m *Mount, _ string) error {
+	h.start = func(_ context.Context, m *runningMount, _ string) error {
 		u, _ := url.Parse(tool.URL)
 		m.addr = u.Host
 		return nil
 	}
-	h.stopMount = func(*Mount) {}
+	h.stopMount = func(*runningMount) {}
 	handler, cleanup, err := h.handler(context.Background())
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -291,19 +291,19 @@ func TestHostAttachMount(t *testing.T) {
 	// The "operator-run" tool: a real delegate RS listener started outside the
 	// host, exactly what `mount-env` would have them launch.
 	verifyKey := base64.RawURLEncoding.EncodeToString(h.oauth.PublicKey())
-	tool := fakeTool(t, h, m, verifyKey)
+	tool := fakeTool(t, h, h.mounts[0], verifyKey)
 	t.Cleanup(tool.Close)
 	u, _ := url.Parse(tool.URL)
 	m.Attach = u.Host
 
-	h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
-		return &toolManifest{Name: m.Name, Version: "test"}, nil
+	h.discover = func(_ context.Context, m *runningMount) (*toolManifest, error) {
+		return &toolManifest{Name: m.cfg.Name, Version: "test"}, nil
 	}
-	h.start = func(context.Context, *Mount, string) error {
+	h.start = func(context.Context, *runningMount, string) error {
 		t.Error("an attach mount must not be spawned")
 		return nil
 	}
-	h.stopMount = func(*Mount) {}
+	h.stopMount = func(*runningMount) {}
 	handler, cleanup, err := h.handler(context.Background())
 	if err != nil {
 		t.Fatalf("handler: %v", err)

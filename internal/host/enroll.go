@@ -27,14 +27,14 @@ type toolManifest struct {
 }
 
 // discoverExec runs `<binary> mcp schema` and parses the manifest.
-func discoverExec(ctx context.Context, m *Mount) (*toolManifest, error) {
-	out, err := exec.CommandContext(ctx, m.Binary, "mcp", "schema").Output()
+func discoverExec(ctx context.Context, m *runningMount) (*toolManifest, error) {
+	out, err := exec.CommandContext(ctx, m.cfg.Binary, "mcp", "schema").Output()
 	if err != nil {
-		return nil, fmt.Errorf("running %s mcp schema: %w", m.Binary, err)
+		return nil, fmt.Errorf("running %s mcp schema: %w", m.cfg.Binary, err)
 	}
 	var manifest toolManifest
 	if err := json.Unmarshal(out, &manifest); err != nil {
-		return nil, fmt.Errorf("parsing %s mcp schema output: %w", m.Binary, err)
+		return nil, fmt.Errorf("parsing %s mcp schema output: %w", m.cfg.Binary, err)
 	}
 	return &manifest, nil
 }
@@ -43,12 +43,12 @@ func discoverExec(ctx context.Context, m *Mount) (*toolManifest, error) {
 // EnrollResult from stdout. The tool's stderr (its structured error, if the
 // callback rejected the credentials) becomes the error message the form
 // re-renders with.
-func enrollExec(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.EnrollResult, error) {
+func enrollExec(ctx context.Context, m *runningMount, req oauth.EnrollRequest) (oauth.EnrollResult, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return oauth.EnrollResult{}, err
 	}
-	cmd := exec.CommandContext(ctx, m.Binary, "mcp", "enroll")
+	cmd := exec.CommandContext(ctx, m.cfg.Binary, "mcp", "enroll")
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -57,11 +57,11 @@ func enrollExec(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.E
 		if msg := toolErrorMessage(stderr.Bytes()); msg != "" {
 			return oauth.EnrollResult{}, fmt.Errorf("%s", msg)
 		}
-		return oauth.EnrollResult{}, fmt.Errorf("%s mcp enroll: %w", m.Binary, err)
+		return oauth.EnrollResult{}, fmt.Errorf("%s mcp enroll: %w", m.cfg.Binary, err)
 	}
 	var res oauth.EnrollResult
 	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		return oauth.EnrollResult{}, fmt.Errorf("parsing %s mcp enroll output: %w", m.Binary, err)
+		return oauth.EnrollResult{}, fmt.Errorf("parsing %s mcp enroll output: %w", m.cfg.Binary, err)
 	}
 	return res, nil
 }
@@ -86,7 +86,7 @@ func toolErrorMessage(stderr []byte) string {
 // bridges to the tool, namespacing the returned binding into the mount's
 // slice of the shared principal record. A mount without a descriptor gets
 // nil — its principals are pre-bound by the operator (`pair add --bind`).
-func (h *Host) buildEnrollment(m *Mount) (*oauth.Enrollment, error) {
+func (h *Host) buildEnrollment(m *runningMount) (*oauth.Enrollment, error) {
 	if m.descriptor == nil {
 		return nil, nil
 	}
@@ -97,12 +97,12 @@ func (h *Host) buildEnrollment(m *Mount) (*oauth.Enrollment, error) {
 			if err != nil {
 				return oauth.EnrollResult{}, err
 			}
-			res.Binding = namespaceBinding(res.Binding, m.Name)
+			res.Binding = namespaceBinding(res.Binding, m.cfg.Name)
 			return res, nil
 		},
 	}
 	if err := e.Validate(); err != nil {
-		return nil, fmt.Errorf("mount %q: invalid credential descriptor: %w", m.Name, err)
+		return nil, fmt.Errorf("mount %q: invalid credential descriptor: %w", m.cfg.Name, err)
 	}
 	return e, nil
 }

@@ -28,9 +28,13 @@ type Mount struct {
 	// listener instead of spawning one — the operator launched the tool
 	// themselves (debugger, launchd, …) with the env `mount-env` prints.
 	Attach string
+}
 
-	addr string // target host:port the proxy forwards to
-	proc *exec.Cmd
+type runningMount struct {
+	cfg      *Mount
+	resource string
+	addr     string // target host:port the proxy forwards to
+	proc     *exec.Cmd
 
 	// descriptor is the tool's credential-enrollment form, discovered from
 	// `mcp schema` at boot; nil when the tool is not self-serve.
@@ -42,29 +46,29 @@ type Mount struct {
 
 // spawn allocates a loopback port and starts the tool's MCP server in delegate
 // mode, injecting its audience and the host's verify key.
-func (h *Host) spawn(ctx context.Context, m *Mount, verifyKey string) error {
+func (h *Host) spawn(ctx context.Context, m *runningMount, verifyKey string) error {
 	port, err := freePort()
 	if err != nil {
 		return err
 	}
 	m.addr = fmt.Sprintf("127.0.0.1:%d", port)
-	cmd := exec.CommandContext(ctx, m.Binary, "mcp",
+	cmd := exec.CommandContext(ctx, m.cfg.Binary, "mcp",
 		"--http", m.addr,
 		"--oauth", h.publicURL)
 	cmd.Env = append(os.Environ(),
 		"AGENT_MCP_OAUTH_RESOURCE="+h.resource(m),
 		"AGENT_MCP_OAUTH_VERIFY_KEY="+verifyKey)
 	cmd.Stdout = io.Discard // the tool's stdout is not the protocol channel in HTTP mode
-	cmd.Stderr = prefixWriter(h.stderr, m.Name)
+	cmd.Stderr = prefixWriter(h.stderr, m.cfg.Name)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting %s: %w", m.Binary, err)
+		return fmt.Errorf("starting %s: %w", m.cfg.Binary, err)
 	}
 	m.proc = cmd
 	return nil
 }
 
 // stop signals the tool to exit.
-func (h *Host) stop(m *Mount) {
+func (h *Host) stop(m *runningMount) {
 	if m.proc != nil && m.proc.Process != nil {
 		_ = m.proc.Process.Kill()
 	}
@@ -77,7 +81,7 @@ func (h *Host) waitReady(ctx context.Context) error {
 	for _, m := range h.mounts {
 		url := fmt.Sprintf("http://%s/mcp", m.addr)
 		if err := waitMountReady(ctx, url, deadline); err != nil {
-			return fmt.Errorf("mount %q: %w", m.Name, err)
+			return fmt.Errorf("mount %q: %w", m.cfg.Name, err)
 		}
 	}
 	return nil

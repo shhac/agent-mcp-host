@@ -27,9 +27,9 @@ func TestHostEnrollmentEndToEnd(t *testing.T) {
 	var events safeBuffer // stdout: the NDJSON event stream
 	_, front := buildTestHostWith(t, store, func(h *Host) {
 		h.stdout = &events
-		h.discover = func(_ context.Context, m *Mount) (*toolManifest, error) {
-			manifest := &toolManifest{Name: m.Name, Version: "test"}
-			if m.Name == "slack" {
+		h.discover = func(_ context.Context, m *runningMount) (*toolManifest, error) {
+			manifest := &toolManifest{Name: m.cfg.Name, Version: "test"}
+			if m.cfg.Name == "slack" {
 				manifest.CredentialDescriptor = &oauth.CredentialDescriptor{
 					Title: "Connect Slack",
 					Modes: []oauth.CredentialMode{{
@@ -40,7 +40,7 @@ func TestHostEnrollmentEndToEnd(t *testing.T) {
 			}
 			return manifest, nil
 		}
-		h.enrollBridge = func(_ context.Context, m *Mount, req oauth.EnrollRequest) (oauth.EnrollResult, error) {
+		h.enrollBridge = func(_ context.Context, m *runningMount, req oauth.EnrollRequest) (oauth.EnrollResult, error) {
 			bridged = req
 			// The tool answers in ITS OWN vocabulary; the host namespaces.
 			return oauth.EnrollResult{Binding: map[string]string{"workspace": "acme"}}, nil

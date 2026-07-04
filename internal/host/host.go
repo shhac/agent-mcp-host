@@ -48,7 +48,7 @@ type Config struct {
 type Host struct {
 	publicURL string
 	addr      string
-	mounts    []*Mount
+	mounts    []*runningMount
 	oauth     *oauth.Server
 	stderr    io.Writer
 	stdout    io.Writer
@@ -56,16 +56,16 @@ type Host struct {
 	// start brings a mount's tool up (sets m.addr), defaulting to the exec
 	// spawn of `<binary> mcp --http … --oauth …`. Tests replace it with an
 	// in-process delegate server to exercise the AS + proxy without exec.
-	start func(ctx context.Context, m *Mount, verifyKey string) error
+	start func(ctx context.Context, m *runningMount, verifyKey string) error
 	// stopMount tears a mount down, defaulting to killing the spawned process.
-	stopMount func(m *Mount)
+	stopMount func(m *runningMount)
 	// discover reads a mount's manifest, defaulting to `<binary> mcp schema`.
-	discover func(ctx context.Context, m *Mount) (*toolManifest, error)
+	discover func(ctx context.Context, m *runningMount) (*toolManifest, error)
 	// enrollBridge hands one enrollment submission to the tool, defaulting to
 	// `<binary> mcp enroll` with the request on stdin.
-	enrollBridge func(ctx context.Context, m *Mount, req oauth.EnrollRequest) (oauth.EnrollResult, error)
+	enrollBridge func(ctx context.Context, m *runningMount, req oauth.EnrollRequest) (oauth.EnrollResult, error)
 
-	mountByResource map[string]*Mount
+	mountByResource map[string]*runningMount
 	emitMu          sync.Mutex // serializes NDJSON event lines on stdout
 }
 
@@ -82,14 +82,14 @@ func New(cfg Config) (*Host, error) {
 		return nil, errors.New("host: at least one mount is required")
 	}
 	publicURL := strings.TrimRight(cfg.PublicURL, "/")
-	resources, byResource, err := mountResources(publicURL, cfg.Mounts)
+	resources, mounts, byResource, err := mountResources(publicURL, cfg.Mounts)
 	if err != nil {
 		return nil, err
 	}
 	h := &Host{
 		publicURL:       publicURL,
 		addr:            cfg.Addr,
-		mounts:          cfg.Mounts,
+		mounts:          mounts,
 		stderr:          orWriter(cfg.Stderr, os.Stderr),
 		stdout:          orWriter(cfg.Stdout, os.Stdout),
 		mountByResource: byResource,
@@ -108,7 +108,7 @@ func New(cfg Config) (*Host, error) {
 		// against the empty mount name.
 		BindingForResource: func(binding map[string]string, resource string) map[string]string {
 			if m := h.mountByResource[resource]; m != nil {
-				return stripNamespace(binding, m.Name)
+				return stripNamespace(binding, m.cfg.Name)
 			}
 			return binding
 		},
@@ -133,36 +133,41 @@ func New(cfg Config) (*Host, error) {
 }
 
 // resource is a mount's audience: the exact /mcp URL a connector calls.
-func (h *Host) resource(m *Mount) string { return mountResource(h.publicURL, m.Name) }
+func (h *Host) resource(m *runningMount) string { return m.resource }
 
-// mountResource builds a mount's audience from the host's public URL and the
-// mount name: the exact /mcp URL a connector calls.
-func mountResource(publicURL, name string) string { return publicURL + "/" + name + "/mcp" }
+// MountResource builds a mount's audience from the host's public URL and the
+// mount name: the exact /mcp URL a connector calls. Exported within the repo
+// because it is a cross-command contract — mount-env prints the same audience
+// serve mints tokens for.
+func MountResource(publicURL, name string) string { return publicURL + "/" + name + "/mcp" }
 
 // mountResources validates the mounts and returns their audiences (in order)
 // plus the audience→mount reverse map both per-resource AS hooks read. It
 // rejects a mount missing a name or binary, or a duplicate name.
-func mountResources(publicURL string, mounts []*Mount) (resources []string, byResource map[string]*Mount, err error) {
+func mountResources(publicURL string, mounts []*Mount) (resources []string, running []*runningMount, byResource map[string]*runningMount, err error) {
 	resources = make([]string, 0, len(mounts))
-	byResource = make(map[string]*Mount, len(mounts))
+	running = make([]*runningMount, 0, len(mounts))
+	byResource = make(map[string]*runningMount, len(mounts))
 	seen := make(map[string]bool, len(mounts))
 	for _, m := range mounts {
 		if m.Name == "" || m.Binary == "" {
-			return nil, nil, fmt.Errorf("host: mount needs a name and a binary (got %+v)", m)
+			return nil, nil, nil, fmt.Errorf("host: mount needs a name and a binary (got %+v)", m)
 		}
 		if seen[m.Name] {
-			return nil, nil, fmt.Errorf("host: duplicate mount name %q", m.Name)
+			return nil, nil, nil, fmt.Errorf("host: duplicate mount name %q", m.Name)
 		}
 		seen[m.Name] = true
-		res := mountResource(publicURL, m.Name)
+		res := MountResource(publicURL, m.Name)
+		rm := &runningMount{cfg: m, resource: res}
 		resources = append(resources, res)
-		byResource[res] = m
+		running = append(running, rm)
+		byResource[res] = rm
 	}
-	return resources, byResource, nil
+	return resources, running, byResource, nil
 }
 
 // mcpPath is a mount's front-door path.
-func (h *Host) mcpPath(m *Mount) string { return "/" + m.Name + "/mcp" }
+func (h *Host) mcpPath(m *runningMount) string { return "/" + m.cfg.Name + "/mcp" }
 
 // Serve spawns each tool in delegate mode, wires the front-door mux, prints the
 // boot banner, and serves until ctx is cancelled — tearing the tools down on
@@ -179,7 +184,7 @@ func (h *Host) Serve(ctx context.Context) error {
 	}
 	h.printBanner()
 	for _, m := range h.mounts {
-		h.emit(hostEvent{Event: "mount_ready", Tool: m.Name, URL: h.resource(m)})
+		h.emit(hostEvent{Event: "mount_ready", Tool: m.cfg.Name, URL: h.resource(m)})
 	}
 	h.emit(hostEvent{Event: "ready"})
 
@@ -205,7 +210,7 @@ func (h *Host) handler(ctx context.Context) (http.Handler, func(), error) {
 	mux := http.NewServeMux()
 	h.oauth.RegisterRoutes(mux)
 
-	var started []*Mount
+	var started []*runningMount
 	cleanup := func() {
 		for _, m := range started {
 			h.stopMount(m)
@@ -226,10 +231,10 @@ func (h *Host) handler(ctx context.Context) (http.Handler, func(), error) {
 // and builds the mount's per-resource enrollment from the descriptor (which
 // must be on the AS before the first authorize request can arrive), then starts
 // the tool. It leaves mux registration and stop-tracking to the caller.
-func (h *Host) bringUpMount(ctx context.Context, m *Mount, verifyKey string) error {
+func (h *Host) bringUpMount(ctx context.Context, m *runningMount, verifyKey string) error {
 	manifest, err := h.discover(ctx, m)
 	if err != nil {
-		return fmt.Errorf("mount %q: %w", m.Name, err)
+		return fmt.Errorf("mount %q: %w", m.cfg.Name, err)
 	}
 	m.descriptor = manifest.CredentialDescriptor
 	if m.enrollment, err = h.buildEnrollment(m); err != nil {
@@ -238,19 +243,19 @@ func (h *Host) bringUpMount(ctx context.Context, m *Mount, verifyKey string) err
 	// Attach mounts proxy to a listener the operator runs themselves (launched
 	// with the env `mount-env` prints); everything else — discovery above,
 	// enrollment, readiness below — is identical to a spawned mount.
-	if m.Attach != "" {
-		m.addr = m.Attach
+	if m.cfg.Attach != "" {
+		m.addr = m.cfg.Attach
 		return nil
 	}
 	if err := h.start(ctx, m, verifyKey); err != nil {
-		return fmt.Errorf("mount %q: %w", m.Name, err)
+		return fmt.Errorf("mount %q: %w", m.cfg.Name, err)
 	}
 	return nil
 }
 
 // proxy reverse-proxies a mount's /<name>/mcp to its loopback /mcp, stripping
 // the tool's CORS headers so the host is the single source of them.
-func (h *Host) proxy(m *Mount) http.Handler {
+func (h *Host) proxy(m *runningMount) http.Handler {
 	target := &url.URL{Scheme: "http", Host: m.addr}
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.ModifyResponse = func(resp *http.Response) error {
@@ -262,7 +267,7 @@ func (h *Host) proxy(m *Mount) http.Handler {
 		return nil
 	}
 	// StripPrefix turns /<name>/mcp into /mcp before the proxy forwards it.
-	return http.StripPrefix("/"+m.Name, rp)
+	return http.StripPrefix("/"+m.cfg.Name, rp)
 }
 
 // printBanner writes the human-facing boot info — connector URLs and the
@@ -273,7 +278,7 @@ func (h *Host) printBanner() {
 	_, _ = fmt.Fprintf(h.stderr, "agent-mcp-host ready · %d tool(s) · authorization: OAuth 2.1 (host)\n", len(h.mounts))
 	_, _ = fmt.Fprint(h.stderr, "Connect these MCP tools (add each URL as its own connector):\n")
 	for _, m := range h.mounts {
-		_, _ = fmt.Fprintf(h.stderr, "  %-10s %s\n", m.Name, h.resource(m))
+		_, _ = fmt.Fprintf(h.stderr, "  %-10s %s\n", m.cfg.Name, h.resource(m))
 	}
 	_, _ = fmt.Fprintf(h.stderr, "  pairing code : %s\n", code)
 	_, _ = fmt.Fprint(h.stderr, "  ⚠ Treat the pairing code like a password. Enter it once in the browser —\n"+
