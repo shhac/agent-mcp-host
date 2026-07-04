@@ -39,12 +39,19 @@ agent-mcp-host pair add alice \
     --bind slack:workspace=acme --bind lin:workspace=acme
 # → prints alice's pairing code (a secret — share it only with alice)
 
-# 2. Serve, fronted by your https origin:
-agent-mcp-host serve \
-    --public-url https://hub.tailnet.example \
+# 2. Serve — with Tailscale, no URL to figure out (derived from MagicDNS,
+#    tunnel torn down on exit):
+agent-mcp-host serve --tailscale funnel \
     --mount slack=agent-slack --mount lin=lin
-# (point your funnel/reverse proxy at the --http listener, default 127.0.0.1:8000)
+# or bring your own https origin:
+#   agent-mcp-host serve --public-url https://hub.example \
+#       --mount slack=agent-slack --mount lin=lin
+# (then point your reverse proxy at the --http listener, default 127.0.0.1:8000)
 ```
+
+There is no separate step to start the tools: `serve` spawns each one in
+delegate mode with everything it needs injected — the binaries just have to
+be installed.
 
 Each mounted tool is spawned as `<binary> mcp --http 127.0.0.1:<port>
 --oauth <public-url>` — delegate mode: the tool validates the host's Ed25519
@@ -82,11 +89,10 @@ Run `agent-mcp-host usage` for the full LLM-optimized reference card.
 
 ## What makes a tool mountable
 
-Any CLI built on `lib-agent-mcp` ≥ v0.21.1 — no tool-side code beyond the
+Any current family CLI — no tool-side code beyond the
 `WithCredentialEnrollment` it already uses for single-tool mode. The host
 discovers each tool's credential form from `mcp schema` and bridges
-enrollment through the hidden `mcp enroll` subcommand. (agent-slack ≥ 0.41.0,
-lin ≥ 0.36.0.)
+enrollment through the hidden `mcp enroll` subcommand.
 
 ## How it relates to the rest of the family
 

@@ -11,14 +11,25 @@ login per tool. Each tool stays its own MCP server; the host mounts it behind
 a path and reverse-proxies to it.
 
 SERVE
-  agent-mcp-host serve --public-url https://hub.example \
+  agent-mcp-host serve --tailscale funnel \
       --mount slack=agent-slack --mount lin=lin [--http 127.0.0.1:8000]
-    · Spawns each tool as '<binary> mcp --http 127.0.0.1:<port> --oauth <url>'
-      (delegate mode: the tool validates the HOST's tokens, mints nothing).
-    · Mounts each at /<name>/mcp — add EACH url as its own MCP connector:
-      https://hub.example/slack/mcp, https://hub.example/lin/mcp, …
-    · --public-url must be the externally-reachable https URL (the OAuth
-      issuer); front the --http listener with your funnel/reverse proxy.
+    · --tailscale funnel|serve fronts the host with a Tailscale tunnel and
+      DERIVES --public-url from the node's MagicDNS name — no URL to figure
+      out; the tunnel is torn down on exit. (--tailscale-port 443|8443|10000.)
+    · Without --tailscale, pass --public-url https://… (the externally-
+      reachable OAuth issuer) and front the --http listener yourself.
+    · Mounts each tool at /<name>/mcp — add EACH url as its own MCP connector:
+      https://<host>/slack/mcp, https://<host>/lin/mcp, …
+
+TOOLS ARE LAUNCHED FOR YOU
+  There is NO separate step to start a mounted tool: serve spawns each one as
+      <binary> mcp --http 127.0.0.1:<port> --oauth <public-url>
+  with its audience and the host's verify key injected via env
+  (AGENT_MCP_OAUTH_RESOURCE, AGENT_MCP_OAUTH_VERIFY_KEY) — delegate mode: the
+  tool validates the HOST's tokens and mints nothing, and needs no flags,
+  URLs, or input of its own. The tool binaries just need to be installed
+  (e.g. brew install shhac/tap/agent-slack) and named in --mount; stopping
+  the host stops them.
 
 OUTPUT CONTRACT
   stdout  NDJSON event stream, one line per lifecycle moment:
@@ -49,9 +60,9 @@ HOW A PERSON CONNECTS
      identity) and prompts only for that tool's enrollment, if any.
 
 REQUIREMENTS PER TOOL
-  Any CLI built on lib-agent-mcp ≥ v0.21.1 is mountable with zero extra code:
-  'mcp schema' exports its credential descriptor and the hidden 'mcp enroll'
-  bridges enrollment. (agent-slack ≥ 0.41.0, lin ≥ 0.36.0.)
+  Any current family CLI is mountable with zero extra code: 'mcp schema'
+  exports its credential descriptor and the hidden 'mcp enroll' bridges
+  enrollment.
 
 SECRETS
   Keychain service: app.paulie.agent-mcp-host.mcp (Ed25519 signing key,

@@ -18,6 +18,8 @@ github.com/shhac/lib-agent-cli v0.17.0 h1:9Jwvpjg6YxxcJ9B2xmKE3fqPUjZ2m738e/vsor
 github.com/shhac/lib-agent-cli v0.17.0/go.mod h1:Yv/GpayyZLZmwY0HpIgm5WWnXxOz9yYM/bLMuKvIy7k=
 github.com/shhac/lib-agent-keyring v0.1.1 h1:cAwFr0UzlQ0xsgO0zY607lmwhvSamPN6Tp1DCNJO7hg=
 github.com/shhac/lib-agent-keyring v0.1.1/go.mod h1:nTk+YfRDc2dc8Nghd1o9w4c40xU8Pqx/UgToN0yGvZ8=
+github.com/shhac/lib-agent-mcp v0.22.0 h1:EPz5ldgIQi9udMqC17JrWjqclHlliqhdIJD3Vi2/n0M=
+github.com/shhac/lib-agent-mcp v0.22.0/go.mod h1:fNoGd2z8RKpVMCE5sT370IqB85jmcwDsmboNtiUbBhE=
 github.com/shhac/lib-agent-oauth v0.7.0 h1:2VIDGLm9fxGUP3D7jT29cPy6bt5JIh6f6blBWl9B3YY=
 github.com/shhac/lib-agent-oauth v0.7.0/go.mod h1:IL7jpL5DCcOZ4rHzIBQOxVYHtP53Q3Y0sMIcgSE4ibk=
 github.com/shhac/lib-agent-output v0.10.0 h1:m/o7/uxf3FLS7M+qcb4x+socjc7hEsvQM+tJilh2+7Y=
