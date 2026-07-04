@@ -1,0 +1,7 @@
+/agent-mcp-host
+/dist/
+/.cache/
+coverage.out
+.DS_Store
+.env*
+.ai-cache/
