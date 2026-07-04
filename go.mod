@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/shhac/lib-agent-cli v0.17.0
-	github.com/shhac/lib-agent-oauth v0.3.0
+	github.com/shhac/lib-agent-oauth v0.5.0
 	github.com/shhac/lib-agent-output v0.10.0
 	github.com/spf13/cobra v1.10.2
 )
