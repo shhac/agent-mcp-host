@@ -1,9 +1,14 @@
 ---
 name: agent-mcp-host
 description: |
-  One-origin MCP host for the agent-* CLI family: run several family CLIs' MCP servers behind one https origin (typically a Tailscale funnel) with one OAuth 2.1 authorization server and a separate login per tool. Use when serving, mounting, or debugging family MCP connectors, or managing people and pairing codes. Triggers: "mcp host", "mcp hub", "agent-mcp-host", "mount a tool", "attach mount", "connector url", "pairing code", "principal", "tailscale funnel", "enrollment", "oauth issuer".
-when_to_use: |
-  Use when the user asks to serve family CLIs as MCP connectors behind one domain, add or mount a tool, run a tool under their own control (attach mount), provision/rotate/revoke a person's pairing code or bindings, explain how someone connects a Claude connector, or debug why a mount, pairing, or enrollment is failing.
+  One-origin MCP host for the agent-* CLI family: serve several family CLIs'
+  MCP servers behind a single https origin (typically a Tailscale funnel)
+  with one OAuth 2.1 authorization server and a separate login per tool. Use
+  when serving, mounting, or debugging family MCP connectors, running a tool
+  under a user's own control via an attach mount, provisioning, rotating, or
+  revoking pairing codes and bindings, explaining how someone connects a
+  Claude connector, or debugging a failing mount, pairing, or enrollment.
+  Triggers: connector url, principal, oauth issuer.
 allowed-tools: Bash(agent-mcp-host *) Read Grep Glob
 ---
 
